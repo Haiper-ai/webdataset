@@ -296,22 +296,22 @@ def group_by_keys(
                 continue
             if lcase:
                 suffix = suffix.lower()
-                if prefix not in remaining_samples:
-                    remaining_samples[prefix] = dict(__key__=prefix, __url__=filesample["__url__"])
-                    counter_dict[prefix] = 0
-                    if suffixes is None or suffix in suffixes:
-                        remaining_samples[prefix][suffix] = value
-                else:
-                    if suffix in remaining_samples[prefix]:
-                        raise ValueError(f"{fname}: duplicate file name in tar file {suffix} {remaining_samples[prefix].keys()}")
+            if prefix not in remaining_samples:
+                remaining_samples[prefix] = dict(__key__=prefix, __url__=filesample["__url__"])
+                counter_dict[prefix] = 0
+                if suffixes is None or suffix in suffixes:
+                    remaining_samples[prefix][suffix] = value
+            else:
+                if suffix in remaining_samples[prefix]:
+                    raise ValueError(f"{fname}: duplicate file name in tar file {suffix} {remaining_samples[prefix].keys()}")
 
-                    if suffixes is None or suffix in suffixes:
-                        remaining_samples[prefix][suffix] = value
-                    if valid_sample(remaining_samples[prefix]):
-                        remaining_samples[prefix]["tar_path"] = filesample["__url__"]
-                        del counter_dict[prefix]
+                if suffixes is None or suffix in suffixes:
+                    remaining_samples[prefix][suffix] = value
+                if valid_sample(remaining_samples[prefix]):
+                    remaining_samples[prefix]["tar_path"] = filesample["__url__"]
+                    del counter_dict[prefix]
 
-                        yield remaining_samples.pop(prefix)
+                    yield remaining_samples.pop(prefix)
 
         except Exception as exn:
             # exn.args = exn.args + (source.get("stream"), source.get("url"))
