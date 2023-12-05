@@ -303,7 +303,7 @@ def group_by_keys(
                         remaining_samples[prefix][suffix] = value
                 else:
                     if suffix in remaining_samples[prefix]:
-                        raise ValueError(f"{fname}: duplicate file name in tar file {suffix} {current_sample.keys()}")
+                        raise ValueError(f"{fname}: duplicate file name in tar file {suffix} {remaining_samples[prefix].keys()}")
 
                     if suffixes is None or suffix in suffixes:
                         remaining_samples[prefix][suffix] = value
@@ -314,7 +314,7 @@ def group_by_keys(
                         yield remaining_samples.pop(prefix)
 
         except Exception as exn:
-            exn.args = exn.args + (source.get("stream"), source.get("url"))
+            # exn.args = exn.args + (source.get("stream"), source.get("url"))
             if handler(exn):
                 continue
             else:
