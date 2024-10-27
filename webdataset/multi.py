@@ -11,8 +11,8 @@ is not available. Subprocesses communicate with the loader through
 ZMQ, provided for high performance multithreaded queueing.
 """
 
-import os
 import multiprocessing as mp
+import os
 import pickle
 import uuid
 import weakref
@@ -25,19 +25,37 @@ all_pids = weakref.WeakSet()
 
 
 class EOF:
-    """A class that indicates that a data stream is finished."""
+    """Indicate that a data stream is finished.
+
+    This class is used to signal the end of a data stream in the MultiLoader.
+
+    Args:
+        **kw: Arbitrary keyword arguments to be set as instance variables.
+    """
 
     def __init__(self, **kw):
-        """Initialize the class with the kw as instance variables."""
+        """Initialize the EOF instance with keyword arguments.
+
+        Args:
+            **kw: Arbitrary keyword arguments to be set as instance variables.
+        """
         self.__dict__.update(kw)
 
 
 def reader(dataset, sockname, index, num_workers):
     """Read samples from the dataset and send them over the socket.
 
-    :param dataset: source dataset
-    :param sockname: name for the socket to send data to
-    :param index: index for this reader, using to indicate EOF
+    This function is run in a separate process to read data from the dataset
+    and send it to the main process through a ZMQ socket.
+
+    Args:
+        dataset: The source dataset to read samples from.
+        sockname (str): The name of the ZMQ socket to send data to.
+        index (int): The index of this reader process.
+        num_workers (int): The total number of worker processes.
+
+    Returns:
+        None
     """
     global the_protocol
     os.environ["WORKER"] = str(index)
@@ -53,21 +71,30 @@ def reader(dataset, sockname, index, num_workers):
 
 
 class MultiLoader:
-    """Alternative to PyTorch DataLoader based on ZMQ."""
+    """Alternative to PyTorch DataLoader based on ZMQ.
+
+    This class creates a multi-process data loader using ZMQ for inter-process
+    communication, providing an alternative to PyTorch's DataLoader.
+
+    Args:
+        dataset: The source dataset to load data from.
+        workers (int): Number of worker processes to spawn. Defaults to 4.
+        verbose (bool): Whether to report progress verbosely. Defaults to False.
+        nokill (bool): If True, don't kill old processes when restarting. Defaults to False.
+        prefix (str): Directory prefix for the ZMQ socket. Defaults to "/tmp/_multi-".
+    """
 
     def __init__(
         self, dataset, workers=4, verbose=False, nokill=False, prefix="/tmp/_multi-"
     ):
-        """Create a MultiLoader for a dataset.
+        """Initialize the MultiLoader instance.
 
-        This creates ZMQ sockets, spawns `workers` subprocesses, and has them send data
-        to the socket.
-
-        :param dataset: source dataset
-        :param workers: number of workers
-        :param verbose: report progress verbosely
-        :param nokill: don't kill old processes when restarting (allows multiple loaders)
-        :param prefix: directory prefix for the ZMQ socket
+        Args:
+            dataset: The source dataset to load data from.
+            workers (int): Number of worker processes to spawn. Defaults to 4.
+            verbose (bool): Whether to report progress verbosely. Defaults to False.
+            nokill (bool): If True, don't kill old processes when restarting. Defaults to False.
+            prefix (str): Directory prefix for the ZMQ socket. Defaults to "/tmp/_multi-".
         """
         self.dataset = dataset
         self.workers = workers
@@ -79,7 +106,7 @@ class MultiLoader:
         self.prefix = prefix
 
     def kill(self):
-        """kill."""
+        """Kill all worker processes and close the ZMQ socket."""
         for pid in self.pids:
             if pid is None:
                 continue
@@ -93,7 +120,17 @@ class MultiLoader:
         self.socket = None
 
     def __iter__(self):
-        """Return an iterator over this dataloader."""
+        """Return an iterator over this dataloader.
+
+        This method sets up the ZMQ socket, spawns worker processes, and yields
+        samples from the dataset.
+
+        Yields:
+            Sample: A sample from the dataset.
+
+        Raises:
+            None
+        """
         if not self.nokill:
             self.kill()
         self.sockname = "ipc://" + self.prefix + str(uuid.uuid4())

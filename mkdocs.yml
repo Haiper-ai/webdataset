@@ -1,10 +1,36 @@
 site_name: webdataset
 repo_url: http://github.com/webdataset/webdataset
-docs_dir: docsrc
-site_dir: docs
-nav:
-    - Home: index.md
-    - API: api/index.html
-    - Examples:
-      - CIFAR10: cifar10.md
+docs_dir: docs
+site_dir: site
 theme: readthedocs
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_root_heading: true
+            heading_level: 3
+
+nav:
+    - README: index.md
+    - WebDataset: webdataset.md
+    - WIDS: wids.md
+    - FAQ: FAQ.md
+    - Examples:
+      - webdataset:
+        - examples/webdataset/index.md
+        - examples/webdataset/wds-notes.md
+        - examples/webdataset/generate-text-dataset.md
+        - examples/webdataset/tesseract-wds.md
+        - examples/webdataset/train-resnet50-wds.md
+        - examples/webdataset/train-resnet50-multiray-wds.md
+        - examples/webdataset/train-ocr-errors-hf.md
+        - examples/webdataset/mi-images.md
+        - examples/webdataset/mi-prompts.md
+        - examples/webdataset/column-store.md
+      - wids:
+        - examples/wids/index.md
+        - examples/wids/train-resnet50-wids.md
+        - examples/wids/train-resnet50-multiray-wids.md

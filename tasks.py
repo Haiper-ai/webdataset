@@ -1,17 +1,23 @@
-from invoke import task
+import glob
+import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
-import shutil
-import glob
+import textwrap
+import time
 
-ACTIVATE = ". ./venv/bin/activate;"
-PACKAGE = "webdataset"
+import yaml
+from invoke import task
+
 VENV = "venv"
-PYTHON3 = f"{VENV}/bin/python3"
-PIP = f"{VENV}/bin/pip"
-TEMP = "webdataset.yml"
+BIN = f"{VENV}/bin"
+PYTHON3 = f"{BIN}/python3"
+ACTIVATE = f". {BIN}/activate;"
+PIP = f"{BIN}/pip"
+PACKAGE = "webdataset"
 DOCKER = "wdstest"
 
 COMMANDS = []
@@ -20,148 +26,9 @@ MODULES = [re.sub("/", ".", name) for name in MODULES if name[0] != "_"]
 
 
 @task
-def venv(c):
-    "Build the virtualenv."
-    c.run("git config core.hooksPath .githooks")
-    c.run(f"test -d {VENV} || python3 -m venv {VENV}")
-    # c.run(f"{ACTIVATE}{PIP} install torch torchvision")
-    # c.run(f"{ACTIVATE}{PIP} install torch==1.10.0+cu113 torchvision==0.11.1+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html")
-    # c.run(f"{ACTIVATE}{PIP} install torch==1.8.2+cu102 torchvision==0.9.2+cu102 -f https://download.pytorch.org/whl/lts/1.8/torch_lts.html")
-    c.run(f"{ACTIVATE}{PIP} install -r requirements.dev.txt")
-    c.run(f"{ACTIVATE}{PIP} install -r requirements.txt")
-    print("done")
-
-
-@task
-def virtualenv(c):
-    "Build the virtualenv."
-    venv(c)
-    
-@task
-def black(c):
-    c.run(f"{ACTIVATE}{PYTHON3} -m black webdataset")
-    
-@task
-def autoflake(c):
-    c.run(f"{ACTIVATE}{PYTHON3} -m autoflake --in-place --remove-all-unused-imports webdataset/[a-z]*.py webdataset/tests/[a-z]*.py")
-
-
-@task
-def minenv(c):
-    "Build the virtualenv (minimal)."
-    c.run("git config core.hooksPath .githooks")
-    c.run(f"test -d {VENV} || python3 -m venv {VENV}")
-    c.run(f"{ACTIVATE}{PIP} install -r requirements.txt")
-    print("done")
-
-
-@task
-def test(c):
-    "Run the tests."
-    # venv(c)
-    c.run(f"{ACTIVATE}{PYTHON3} -m pytest -x")
-
-
-@task
-def newversion(c):
-    """Increment the version number."""
-    if "working tree clean" not in c.run("git status").stdout:
-        input()
-    text = open("setup.py").read()
-    version = re.search('version *= *"([0-9.]+)"', text).group(1)
-    print("old version", version)
-    version = [int(x) for x in version.split(".")]
-    version[-1] += 1
-    version = ".".join(str(x) for x in version)
-    print("new version", version)
-    text = re.sub(
-        r'version *= *"[0-9]+[.][0-9]+[.][0-9]+"',
-        f'version = "{version}"',
-        text,
-    )
-    with open("setup.py", "w") as stream:
-        stream.write(text)
-    with open("VERSION", "w") as stream:
-        stream.write(version)
-    text = open("webdataset/__init__.py").read()
-    text = re.sub(
-        r'^__version__ = ".*',
-        f'__version__ = "{version}"',
-        text,
-        flags=re.MULTILINE,
-    )
-    with open("webdataset/__init__.py", "w") as stream:
-        stream.write(text)
-    os.system("grep 'version *=' setup.py")
-    os.system("grep '__version__ *=' webdataset/__init__.py")
-    # venv(c)
-    # c.run(f"{ACTIVATE}{PYTHON3} -m pytest")
-    # c.run("git add VERSION setup.py webdataset/__init__.py")
-    # c.run("git commit -m 'incremented version'")
-    # c.run("git push")
-
-
-@task
-def release(c):
-    "Tag the current version as a release on Github."
-    if "working tree clean" not in c.run("git status").stdout:
-        input()
-    version = open("VERSION").read().strip()
-    # os.system(f"hub release create {version}")  # interactive
-    os.system(f"gh release create {version}")  # interactive
-
-
-@task
-def coverage(c):
-    """Run tests and test coverage."""
-    c.run("coverage run -m pytest && coveragepy-lcov")
-
-
-pydoc_template = """
-# Module `{module}`
-
-```
-{text}
-```
-"""
-
-command_template = """
-# Command `{command}`
-
-```
-{text}
-```
-"""
-
-
-@task
-def nbgen(c):
-    "Reexecute IPython Notebooks."
-    opts = "--ExecutePreprocessor.timeout=-1"
-    for nb in glob.glob("notebooks/*.ipynb"):
-        if "/convert-" in nb:
-            continue
-        c.run(f"{ACTIVATE} jupyter nbconvert {opts} --execute --to notebook {nb}")
-
-
-@task
-def gendocs(c):
-    "Generate docs."
-
-    c.run("jupyter nbconvert --to markdown readme.ipynb && mv readme.md README.md")
-    # convert IPython Notebooks
-    for nb in glob.glob("notebooks/*.ipynb"):
-        c.run(f"{ACTIVATE} jupyter nbconvert {nb} --to markdown --output-dir=docsrc/.")
-    c.run(f"mkdocs build")
-    c.run(f"pdoc -t docsrc -o docs/api webdataset")
-    c.run("git add docs")
-
-
-@task
 def clean(c):
     "Remove temporary files."
-    c.run(f"rm -rf {TEMP}")
-    c.run(f"rm -rf build dist __pycache__ */__pycache__ *.pyc */*.pyc")
+    c.run(f"rm -rf build site dist __pycache__ */__pycache__ *.pyc */*.pyc")
 
 
 @task(clean)
@@ -170,112 +37,271 @@ def cleanall(c):
     c.run(f"rm -rf venv")
 
 
-@task(test)
-def twine_pypi_release(c):
-    "Manually push to PyPI via Twine."
-    c.run("rm -f dist/*")
-    c.run("$(PYTHON3) setup.py sdist bdist_wheel")
-    c.run("twine check dist/*")
-    c.run("twine upload dist/*")
-
-
-base_container = f"""
-FROM ubuntu:20.04
-ENV LC_ALL=C
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get -qqy update
-RUN apt-get install -qqy git
-RUN apt-get install -qqy python3
-RUN apt-get install -qqy python3-pip
-RUN apt-get install -qqy python3-venv
-RUN apt-get install -qqy curl
-WORKDIR /tmp
-RUN python3 -m venv venv
-RUN . venv/bin/activate; pip install --no-cache-dir pytest
-RUN . venv/bin/activate; pip install --no-cache-dir jupyterlab
-RUN . venv/bin/activate; pip install --no-cache-dir numpy
-RUN . venv/bin/activate; pip install --no-cache-dir nbconvert
-RUN . venv/bin/activate; pip install --no-cache-dir torch==1.4.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
-RUN . venv/bin/activate; pip install --no-cache-dir torchvision==0.5.0+cpu -f https://download.pytorch.org/whl/torch_stable.html
-"""
-
-github_test = """
-FROM webdatasettest-base
-ENV SHELL=/bin/bash
-RUN git clone https://git@github.com/tmbdev/webdataset.git /tmp/webdataset
-WORKDIR /tmp/webdataset
-RUN ln -s /tmp/venv .
-RUN . venv/bin/activate; pip install --no-cache-dir pytest
-RUN . venv/bin/activate; pip install --no-cache-dir -r requirements.txt
-RUN . venv/bin/activate; python3 -m pytest
-"""
-
-pypi_test = """
-FROM webdatasettest-base
-ENV SHELL=/bin/bash
-WORKDIR /tmp/webdataset
-RUN ln -s /tmp/venv .
-RUN . venv/bin/activate; pip install --no-cache-dir pytest
-RUN . venv/bin/activate; pip install --no-cache-dir webdataset
-RUN git clone https://git@github.com/tmbdev/webdataset.git /tmp/webdataset-github
-RUN cp -av /tmp/webdataset-github/webdataset/tests tests
-RUN cp -av /tmp/webdataset-github/testdata testdata
-RUN . venv/bin/activate; python3 -m pytest
-"""
-
-
-def docker_build(c, instructions, tag=None, files=[], nocache=False):
-    with tempfile.TemporaryDirectory() as dir:
-        with open(dir + "/Dockerfile", "w") as stream:
-            stream.write(instructions)
-        for fname in files:
-            shutil.copy(fname, dir + "/.")
-        flags = "--no-cache" if nocache else ""
-        if tag is not None:
-            flags += f" -t {tag}"
-        c.run(f"cd {dir} && docker build {flags} .")
-
-
-def here(s):
-    return f"<<EOF\n{s}\nEOF\n"
+@task
+def venv(c):
+    "Build the virtualenv."
+    c.run(f"test -d {VENV} || python3 -m venv {VENV}")
+    c.run(f"{BIN}/pip install --upgrade pip")
+    c.run(f"{BIN}/pip install -e '.[dev]'")
+    c.run(f"pre-commit install || true")
+    print("done")
 
 
 @task
-def dockerbase(c):
-    "Build a base container."
-    docker_build(c, base_container, tag="webdatasettest-base")
-
-
-@task(dockerbase)
-def githubtest(c):
-    "Test the latest version on Github in a docker container."
-    dockerbase(c)
-    docker_build(c, github_test, nocache=True)
+def ruff(c):
+    "Run the ruff linter."
+    c.run(f"{BIN}/ruff check .")
 
 
 @task
-def pypitest(c):
-    "Test the latest version on PyPI in a docker container."
-    dockerbase(c)
-    docker_build(c, pypi_test, nocache=True)
-
-
-required_files = f"""
-.github/workflows/pypi.yml
-.github/workflows/test.yml
-.githooks/pre-push
-.gitignore
-""".strip().split()
+def docsserve(c):
+    "Serve the documentation locally in a browser."
+    c.run(f"{BIN}/mkdocs serve -o")
 
 
 @task
-def checkall(c):
-    "Check for existence of required files."
-    for (root, dirs, files) in os.walk(f"./{PACKAGE}"):
-        if "/__" in root:
+def docspush(c):
+    """Generate the documentation and push it to Github pages."""
+    c.run("rm -rf site")
+    c.run("mkdocs build")
+    c.run("ghp-import -n -p site")
+    c.run("rm -rf site")
+
+
+def summarize_notebook(nb):
+    """Summarize a notebook."""
+    import textwrap
+
+    prompt = textwrap.dedent(
+        """
+    Here is a notebook in markdown format. Please summarize the purpose and contents
+    of the notebook in a few sentences. The only markup you may use is `...` for
+    quoting identifiers. Except for quoted identifiers, do not include any code 
+    or output in the summary. Do not use any other markup or markdown, just plain text.
+    In your summary, focus on the use of webdataset, wids, or wsds libraries (note:
+    these are different libraries and be sure to talk only about the library that
+    is being used in the notebook) in the notebooks and what
+    the notebook illustrates about the use of those libraries,
+    rather than the deep learning problem or processing problem used to illustrate
+    the library usage. Mention the primary classes in those libraries used/exemplified
+    by each notebook.
+    Keep your summary brief, 1-3 sentences at most. Do not describe the contents
+    of the notebook step-by-step.
+    """
+    )
+    summary = os.popen(f"sgpt --no-md '{prompt}' < {nb}").read().strip()
+    summary = textwrap.fill(summary, 80)
+    return summary
+
+
+def find_with_key(d, key):
+    if isinstance(d, dict):
+        if key in d:
+            return d[key]
+        for k, v in d.items():
+            result = find_with_key(v, key)
+            if result is not None:
+                return result
+    if isinstance(d, list):
+        for v in d:
+            result = find_with_key(v, key)
+            if result is not None:
+                return result
+    return None
+
+
+@task
+def docsnbgen(c):
+    assert os.path.exists("./mkdocs.yml")
+    assert os.path.exists("./docs")
+    assert os.path.exists("./examples")
+    structure = yaml.safe_load(open("mkdocs.yml"))
+    structure = find_with_key(structure, "Examples")
+    for item in structure:
+        if not isinstance(item, dict):
             continue
-        assert "__init__.py" in files, (root, dirs, files)
-    assert os.path.isdir("./docs")
-    for fname in required_files:
-        assert os.path.exists(fname), fname
-    assert "run: make" not in open(".github/workflows/test.yml").read()
+        k = list(item.keys())[0]
+        v = item[k]
+        odir = f"./docs/examples/{k}"
+        os.makedirs(odir, exist_ok=True)
+        for onav in v:
+            if "index.md" in onav:
+                continue
+            output = f"./docs/{onav}"
+            nb = "./examples/" + os.path.basename(output).replace(".md", ".ipynb")
+            print(nb, "-->", output)
+            # continue
+            if os.path.exists(output) and os.path.getmtime(nb) < os.path.getmtime(
+                output
+            ):
+                continue
+            c.run(
+                f"{ACTIVATE}jupyter nbconvert --ClearOutputPreprocessor.enabled=True --inplace {nb}"
+            )
+            c.run(
+                f"{ACTIVATE}jupyter nbconvert {nb} --to markdown --output-dir=docs/examples/{k}"
+            )
+            summary = summarize_notebook(output)
+            summary_fname = output.replace(".md", ".summary.md")
+            with open(summary_fname, "w") as stream:
+                stream.write(summary)
+            print()
+
+        def mksection(summary_fname):
+            with open(summary_fname) as stream:
+                summary = stream.read().strip()
+            section_name = os.path.basename(summary_fname).replace(".summary.md", "")
+            capitalized_name = section_name.replace("-", " ").title()
+            link = f"[{capitalized_name}](./{section_name})"
+            return f"### {capitalized_name}\n\n{link}\n\n{summary}\n\n"
+
+        summaries = [
+            mksection(fname) for fname in glob.glob(f"docs/examples/{k}/*.summary.md")
+        ]
+        with open(f"docs/examples/{k}/index.md", "w") as stream:
+            print("Writing", f"docs/examples/{k}/index.md")
+            stream.write("\n\n".join(summaries))
+
+
+@task
+def nbrun(c):
+    """Run selected notebooks with papermill+parameters; put into ./out."""
+
+    def nbprocess(c, nb, *args, **kwargs):
+        """Process one notebook."""
+        out_file = f"docs/output/{nb}"
+        if not os.path.exists(out_file) or os.path.getmtime(nb) > os.path.getmtime(
+            out_file
+        ):
+            c.run(
+                f"../venv/bin/python -m papermill -l python {' '.join(args)} {nb} docs/output/_{nb}"
+            )
+            c.run(f"mv docs/output/_{nb} {out_file}")
+
+    with c.cd("examples"):  # Change directory to 'examples'
+        c.run("rm -f *.log *.out.ipynb *.stripped.ipynb _temp.ipynb", pty=True)
+        c.run("mkdir -p docs/output", pty=True)
+        nbprocess(c, "generate-text-dataset.ipynb")
+        nbprocess(c, "train-ocr-errors-hf.ipynb", "-p", "max_steps", "100")
+        nbprocess(c, "train-resnet50-wds.ipynb", "-p", "max_steps", "10000")
+        nbprocess(c, "train-resnet50-wids.ipynb", "-p", "max_steps", "10000")
+        nbprocess(c, "train-resnet50-multiray-wds.ipynb", "-p", "max_steps", "1000")
+        nbprocess(c, "train-resnet50-multiray-wids.ipynb", "-p", "max_steps", "1000")
+        nbprocess(c, "tesseract-wds.ipynb")
+
+
+@task
+def quick(c):
+    "Run the tests."
+    # venv(c)
+    c.run(f"{ACTIVATE}{PYTHON3} -m pytest -x tests -m quick")
+
+
+@task
+def test(c):
+    "Run the tests."
+    # venv(c)
+    c.run(f"{ACTIVATE}{PYTHON3} -m pytest -x tests")
+
+
+@task
+def testwids(c):
+    "Run the wids tests."
+    c.run(f"{ACTIVATE}{PYTHON3} -m pytest -x tests/test_wids*.py")
+
+
+@task
+def testdebug(c):
+    "Run the tests with --pdb."
+    c.run(f"{ACTIVATE}{PYTHON3} -m pytest -x --pdb tests")
+
+
+@task
+def testcov(c):
+    "Run the tests and generate coverage.json and coverage.lcov."
+    # venv(c)
+    c.run(
+        f"{ACTIVATE}{PYTHON3} -m pytest ./tests --cov=wids "
+        + "--cov=webdataset --cov-report=term-missing --cov-branch "
+        + "--cov-report=json:coverage.json --cov-report=lcov:coverage.lcov"
+    )
+
+
+@task
+def faqmake(c):
+    "Create the FAQ.md file from github issues."
+    from helpers.faq import faq_intro, generate_faq_entries_from_issues, wrap_long_lines
+
+    generate_faq_entries_from_issues()
+    output = open("FAQ.md", "w")
+    output.write(faq_intro)
+    entries = sorted(glob.glob("faqs/[a-zA-Z]*.md"))
+    entries = sorted(glob.glob("faqs/[0-9]*.md"), reverse=True)
+    for fname in entries:
+        with open(fname) as stream:
+            text = stream.read()
+        if "N/A" in text[:20]:
+            continue
+        text = text.strip()
+        text = re.sub(r"[ \t]+$", "", text, flags=re.MULTILINE)
+        text = wrap_long_lines(text)
+        if len(text) < 10:
+            continue
+        text += "\n\n"
+        if match := re.match(r"faqs/([0-9]+)\.md", fname):
+            issue_number = int(match.group(1))
+            text = f"Issue #{issue_number}\n\n{text}"
+        output.write("-" * 78 + "\n\n")
+        output.write(text.strip() + "\n\n")
+    output.close()
+    c.run("cp FAQ.md docs/FAQ.md")
+
+
+# def twine_pypi_release(c):
+#     "Manually push to PyPI via Twine."
+#     c.run("rm -f dist/*")
+#     c.run("$(PYTHON3) -m build --sdist")
+#     c.run("$(PYTHON3) -m build --wheel")
+#     c.run("twine check dist/*")
+#     c.run("twine upload dist/*")
+
+
+def update_version_numbers_locally(c):
+    c.run("bump2version patch")
+
+
+@task
+def releasenotes(c):
+    # get the last release tag using gh
+    last_tag = c.run("gh release list --limit 1 | cut -f1").stdout.strip()
+    print("Last tag:", last_tag)
+    # compute a diff between the last tag and the current state
+    diff = c.run(f"gh release view {last_tag}").stdout
+    cmd = "git log --since={last_tag} | "
+    cmd += "sgpt --no-md 'summarize these commit messages into Python/github release notes'"
+    notes = c.run(cmd).stdout
+    with open("RELEASE_NOTES.md", "w") as stream:
+        stream.write(notes)
+
+
+def read_version():
+    # open the pyproject.toml file and read the version number
+    with open("pyproject.toml") as stream:
+        for line in stream:
+            if "version" in line:
+                version = line.split("=")[1].strip()
+                version = version.replace('"', "")
+                return version
+
+
+@task
+def release(c):
+    "Tag the current version as a release on Github."
+    assert os.path.exists("RELEASE_NOTES.md")
+    assert c.run("bump2version --tag patch").ok
+    assert c.run("git push --follow-tags").ok
+    version = read_version()
+    tag = "v" + version
+    assert c.run(f"gh release create {tag} -t {tag} --notes-file RELEASE_NOTES.md").ok
+    assert c.run(f"rm RELEASE_NOTES.md").ok
+    print(f"Release {version} created successfully.")

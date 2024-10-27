@@ -11,28 +11,28 @@ from . import tenbin
 from .autodecode import (
     Continue,
     Decoder,
+    DecodingError,
     gzfilter,
     handle_extension,
     imagehandler,
+    pytorch_weights_only,
     torch_audio,
     torch_loads,
     torch_video,
 )
 from .cache import (
+    LRUCleanup,
     cached_tarfile_samples,
     cached_tarfile_to_samples,
-    maybe_cached_tarfile_to_samples,
-    lru_cleanup,
     pipe_cleaner,
 )
-from .cborsiterators import cbors2_to_samples, cbors_to_samples
-from .compat import WebDataset, WebLoader, FluidWrapper
+from .compat import FluidInterface, FluidWrapper, WebDataset, WebLoader
 from .extradatasets import MockDataset, with_epoch, with_length
 from .filters import (
-    associate,
-    batched,
     Cached,
     LMDBCached,
+    associate,
+    batched,
     decode,
     detshuffle,
     extract_keys,
@@ -53,6 +53,7 @@ from .filters import (
     unbatched,
     xdecode,
 )
+from .gopen import gopen, gopen_schemes
 from .handlers import (
     ignore_and_continue,
     ignore_and_stop,
@@ -60,6 +61,7 @@ from .handlers import (
     warn_and_continue,
     warn_and_stop,
 )
+from .mix import RandomMix, RoundRobin
 from .pipeline import DataPipeline
 from .shardlists import (
     MultiShardSample,
@@ -75,7 +77,5 @@ from .shardlists import (
 from .tariterators import tarfile_samples, tarfile_to_samples
 from .utils import PipelineStage, repeatedly
 from .writer import ShardWriter, TarWriter, numpy_dumps, torch_dumps
-from .mix import RandomMix, RoundRobin
-from .gopen import gopen, gopen_schemes
 
-__version__ = "0.2.51"
+__version__ = "0.2.107"

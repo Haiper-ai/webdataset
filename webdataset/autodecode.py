@@ -6,11 +6,17 @@
 
 """Automatically decode webdataset samples."""
 
-import io, json, os, pickle, re, tempfile
+import io
+import json
+import os
+import pickle
+import re
+import tempfile
 from functools import partial
 
 import numpy as np
 
+pytorch_weights_only = os.environ.get("WDS_PYTORCH_WEIGHTS_ONLY", "0") == "1"
 
 # Obtained with:
 # ```
@@ -114,29 +120,41 @@ def torch_loads(data: bytes):
     import torch
 
     stream = io.BytesIO(data)
-    return torch.load(stream)
+    return torch.load(stream, weights_only=pytorch_weights_only)
 
 
 def tenbin_loads(data):
+    """Load data from tenbin format. Imports tenbin only if necessary."""
     from . import tenbin
 
     return tenbin.decode_buffer(data)
 
 
 def msgpack_loads(data):
+    """Load data from msgpack format. Imports msgpack only if necessary."""
     import msgpack
 
     return msgpack.unpackb(data)
 
 
 def npy_loads(data):
+    """Load data from npy format. Imports numpy only if necessary."""
     import numpy.lib.format
 
     stream = io.BytesIO(data)
     return numpy.lib.format.read_array(stream)
 
 
+def npz_loads(data):
+    """Load data from npz format. Imports numpy only if necessary."""
+    import numpy.lib.format
+
+    stream = io.BytesIO(data)
+    return dict(np.load(stream))
+
+
 def cbor_loads(data):
+    """Load data from cbor format. Imports cbor only if necessary."""
     import cbor
 
     return cbor.loads(data)
@@ -161,7 +179,7 @@ decoders = {
     "mp": msgpack_loads,
     "msg": msgpack_loads,
     "npy": npy_loads,
-    "npz": lambda data: np.load(io.BytesIO(data)),
+    "npz": npz_loads,
     "cbor": cbor_loads,
 }
 
@@ -292,7 +310,7 @@ class ImageHandler:
         if imagespec not in list(imagespecs.keys()):
             raise ValueError("Unknown imagespec: %s" % imagespec)
         self.imagespec = imagespec.lower()
-        self.extensions = extensions
+        self.extensions = set(extensions)
 
     def __call__(self, key, data):
         """Perform image decoding.
@@ -358,9 +376,9 @@ class ImageHandler:
             import torch
 
             if result.ndim == 3:
-                return torch.from_numpy(result.transpose(2, 0, 1))
+                return torch.from_numpy(result.transpose(2, 0, 1).copy())
             else:
-                return torch.from_numpy(result)
+                return torch.from_numpy(result.copy())
 
         return None
 
@@ -474,6 +492,16 @@ default_pre_handlers = [gzfilter]
 default_post_handlers = [basichandlers]
 
 
+class DecodingError(Exception):
+    """Exception class for decoding errors."""
+
+    def __init__(self, url=None, key=None, k=None, sample=None):
+        self.url = url
+        self.key = key
+        self.k = k
+        self.sample = sample
+
+
 class Decoder:
     """Decode samples using a list of handlers.
 
@@ -490,6 +518,7 @@ class Decoder:
         :param only: a list of extensions; when give, only ignores files with those extensions
         :param partial: allow partial decoding (i.e., don't decode fields that aren't of type bytes)
         """
+        assert isinstance(handlers, list), f"handlers = {handlers} must be a list"
         if isinstance(only, str):
             only = only.split()
         self.only = only if only is None else set(only)
@@ -527,26 +556,31 @@ class Decoder:
         result = {}
         assert isinstance(sample, dict), sample
         for k, v in list(sample.items()):
-            if k[0:2] == "__":
-                if isinstance(v, bytes):
-                    try:
-                        v = v.decode("utf-8")
-                    except:
-                        print(f"Can't decode v of k = {k} as utf-8: v = {v}")
-                result[k] = v
-                continue
-            if self.only is not None and k not in self.only:
-                result[k] = v
-                continue
-            assert v is not None
-            if self.partial:
-                if isinstance(v, bytes):
-                    result[k] = self.decode1(k, v)
-                else:
+            try:
+                if k[:2] == "__":
+                    if isinstance(v, bytes):
+                        try:
+                            v = v.decode("utf-8")
+                        except Exception:
+                            print(f"Can't decode v of k = {k} as utf-8: v = {v}")
                     result[k] = v
-            else:
-                assert isinstance(v, bytes), f"k,v = {k}, {v}"
-                result[k] = self.decode1(k, v)
+                    continue
+                if self.only is not None and k not in self.only:
+                    result[k] = v
+                    continue
+                assert v is not None
+                if self.partial:
+                    if isinstance(v, bytes):
+                        result[k] = self.decode1(k, v)
+                    else:
+                        result[k] = v
+                else:
+                    assert isinstance(v, bytes), f"k,v = {k}, {v}"
+                    result[k] = self.decode1(k, v)
+            except Exception as exn:
+                key = sample.get("__key__", None)
+                url = sample.get("__url__", None)
+                raise DecodingError(key=key, url=url, k=k, sample=sample) from exn
         return result
 
     def __call__(self, sample):
@@ -556,3 +590,6 @@ class Decoder:
         """
         assert isinstance(sample, dict), (len(sample), sample)
         return self.decode(sample)
+
+
+default_decoder = Decoder(default_pre_handlers + default_post_handlers)
