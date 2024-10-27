@@ -13,7 +13,7 @@ import warnings
 from functools import partial
 from typing import Any, BinaryIO, Dict, Optional, TypeVar, Union
 from urllib.parse import quote, urlparse
-
+from collections import defaultdict
 import numpy as np
 import torch.distributed as dist
 
@@ -84,7 +84,6 @@ def splitname(fname):
     basename, extension = re.match(r"^(.*?)(\.[^.]+)$", fname).groups()
     return basename, extension
 
-
 def group_by_key(names):
     """Group the file names by key.
 
@@ -95,24 +94,18 @@ def group_by_key(names):
         A list of lists of indices, where each sublist contains indices of files
         with the same key.
     """
-    groups = []
-    last_key = None
-    current = []
+    groups_dict = defaultdict(list)
     for i, fname in enumerate(names):
         # Ignore files that are not in a subdirectory.
         if "." not in fname:
             print(f"Warning: Ignoring file {fname} (no '.')")
             continue
         key, ext = splitname(fname)
-        if key != last_key:
-            if current:
-                groups.append(current)
-            current = []
-            last_key = key
-        current.append(i)
-    if current:
-        groups.append(current)
-    return groups
+        groups_dict[key].append(i)
+    
+    # Convert the dictionary values to a list of lists for the desired output format
+    return list(groups_dict.values())
+
 
 
 open_itfs = {}
