@@ -103,8 +103,7 @@ def group_by_key(names):
         key, ext = splitname(fname)
         groups_dict[key].append(i)
     
-    # Convert the dictionary values to a list of lists for the desired output format
-    return list(groups_dict.values())
+    return groups_dict
 
 
 
@@ -471,36 +470,18 @@ class ShardListDataset(Dataset[T]):
                 )
             )
 
-    def get_shard(self, index):
-        """Get the shard and index within the shard corresponding to the given index."""
-        # Find the shard corresponding to the given index.
-        shard_idx = np.searchsorted(self.cum_lengths, index, side="right")
-
-        # Figure out which index within the shard corresponds to the
-        # given index.
-        if shard_idx == 0:
-            inner_idx = index
-        else:
-            inner_idx = index - self.cum_lengths[shard_idx - 1]
-
-        # Get the shard and return the corresponding element.
-        desc = self.shards[shard_idx]
-        url = desc["url"]
-        shard = self.cache.get_shard(url)
-        return shard, inner_idx, desc
-
-    def __getitem__(self, index):
+    def __getitem__(self, url_index):
         """Return the sample corresponding to the given index."""
-        shard, inner_idx, desc = self.get_shard(index)
-        sample = shard[inner_idx]
+
+        url, index = url_index
+        shard = self.cache.get_shard(url)
+        sample = shard[index]
 
         # Check if we're missing the cache too often.
         self.check_cache_misses()
 
-        sample["__dataset__"] = desc.get("dataset")
         sample["__index__"] = index
-        sample["__shard__"] = desc["url"]
-        sample["__shardindex__"] = inner_idx
+        sample["__shard__"] = url
 
         # Apply transformations
         for transform in self.transformations:
