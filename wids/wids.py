@@ -535,6 +535,34 @@ def iterate_ranges(ranges, rng, indexshuffle=True, shardshuffle=True):
         yield from sample_indexes
 
 
+def iterate_fragments(fragments, chunk_size, rng, indexshuffle=True, shardshuffle=True):
+    if shardshuffle:
+        rng.shuffle(fragments)
+
+    fragments = iter(fragments.items())
+    samples = []
+    while True:
+        tar, fragment_list = next(fragments, (None, None))
+
+        if tar is None:
+            if indexshuffle:
+                rng.shuffle(samples)
+
+            yield from samples
+            break
+
+        fragment_list = [(tar, f) for f in fragment_list]
+        samples.extend(fragment_list)
+        
+        if len(samples) >= chunk_size:
+            if indexshuffle:
+                rng.shuffle(samples)
+
+            yield from samples[:chunk_size]
+            samples = fragment_list[chunk_size:]
+
+
+
 class ShardListSampler(Sampler):
     """A sampler that samples consistent with a ShardListDataset.
 
@@ -579,7 +607,7 @@ class ChunkedSampler(Sampler):
 
     def __init__(
         self,
-        dataset,
+        fragments,
         *,
         dslength_per_replica=-1,
         num_samples=None,
@@ -591,7 +619,7 @@ class ChunkedSampler(Sampler):
         if isinstance(num_samples, int):
             lo, hi = 0, num_samples
         elif num_samples is None:
-            lo, hi = 0, len(dataset)
+            lo, hi = 0, sum(len(f) for f in fragments.values())
         else:
             lo, hi = num_samples
 
@@ -599,7 +627,8 @@ class ChunkedSampler(Sampler):
             dslength_per_replica if dslength_per_replica > 0 else (hi - lo)
         )
 
-        self.ranges = [(i, min(i + chunksize, hi)) for i in range(lo, hi, chunksize)]
+        self.fragments = fragments
+        self.chunksize = chunksize
         self.seed = seed
         self.shuffle = shuffle
         self.shufflefirst = shufflefirst
@@ -611,8 +640,9 @@ class ChunkedSampler(Sampler):
     def __iter__(self):
         self.rng = random.Random(self.seed + 1289738273 * self.epoch)
         shardshuffle = self.shufflefirst or self.epoch > 0
-        yield from iterate_ranges(
-            self.ranges,
+        yield from iterate_fragments(
+            self.fragments,
+            self.chunksize,
             self.rng,
             indexshuffle=self.shuffle,
             shardshuffle=(self.shuffle and shardshuffle),
