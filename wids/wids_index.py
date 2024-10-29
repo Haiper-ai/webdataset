@@ -124,7 +124,12 @@ def main_create(args):
         print(fname)
         downloaded = wids_dl.download_file(fname, "/tmp/shard.tar")
         md5sum = wids.compute_file_md5sum(downloaded)
-        nsamples = wids.compute_num_samples(downloaded)
+        try:
+            nsamples = wids.compute_num_samples(downloaded)
+        except Exception as e:
+            print(f"failed on {fname} because {e}")
+            continue
+        
         filesize = os.stat(downloaded).st_size
         files.append(
             dict(url=fname, md5sum=md5sum, nsamples=nsamples, filesize=filesize)
